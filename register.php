@@ -8,6 +8,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $conn = getDBConnection();
     $club_name = $conn->real_escape_string(trim($_POST['club_name']));
     $email = $conn->real_escape_string(trim($_POST['email']));
+    $description = $conn->real_escape_string(trim($_POST['description']));
     $password = $_POST['password'];
     $confirm_password = $_POST['confirm_password'];
     //conditional statement if sakto or dili ang possword
@@ -23,8 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Email is already registered.';
         } else {
             $password_hash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $conn->prepare("INSERT INTO users (club_name, email, password_hash) VALUES (?, ?, ?)");
-            $stmt->bind_param('sss', $club_name, $email, $password_hash);
+            $stmt = $conn->prepare("INSERT INTO users (club_name, email, description, password_hash) VALUES (?, ?, ?, ?)");
+            $stmt->bind_param('ssss', $club_name, $email, $description, $password_hash);
             if ($stmt->execute()) {
                 // Send welcome email using the config function
                 $emailBody = '
@@ -94,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-radius: 12px;
             box-shadow: 0 4px 24px rgba(0,0,0,0.10);
             padding: 36px 32px 28px 32px;
-            width: 350px;
+            width: 400px;
             box-sizing: border-box;
             text-align: left;
         }
@@ -124,6 +125,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border: 1px solid #bbb;
             border-radius: 4px;
             margin-bottom: 8px;
+            box-sizing: border-box;
+        }
+        .register-textarea {
+            width: 100%;
+            padding: 8px 10px;
+            font-size: 1rem;
+            border: 1px solid #bbb;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            resize: vertical;
+            min-height: 80px;
             box-sizing: border-box;
         }
         .register-btn {
@@ -169,6 +181,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <label class="register-label" for="email">Email</label>
             <input class="register-input" type="email" id="email" name="email" placeholder="Enter your email" required>
+            
+            <label class="register-label" for="description">Club Description</label>
+            <textarea class="register-textarea" id="description" name="description" placeholder="Briefly describe your club (optional)"></textarea>
 
             <label class="register-label" for="password">Password</label>
             <input class="register-input" type="password" id="password" name="password" placeholder="Enter password" required>

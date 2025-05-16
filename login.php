@@ -2,86 +2,116 @@
 session_start();
 require 'config.php';
 
+// Handle logout if requested
+if (isset($_GET['logout']) && $_GET['logout'] === 'true') {
+    // Destroy the session
+    $_SESSION = array();
+    if (isset($_COOKIE[session_name()])) {
+        setcookie(session_name(), '', time() - 3600, '/');
+    }
+    session_destroy();
+    $success_message = "You have been successfully logged out.";
+}
+
 // Prevent caching
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Cache-Control: post-check=0, pre-check=0', false);
 header('Pragma: no-cache');
 
-// If already logged in and verified, redirect to dashboard
+// Redirect if already logged in and verified
 if (isset($_SESSION['user_id']) && isset($_SESSION['is_verified']) && $_SESSION['is_verified'] === true) {
-    header('Location: dashboard.php');
-    exit();
+    if (isset($_SESSION['role'])) {
+        if ($_SESSION['role'] === 'admin') {
+            header('Location: admin/dashboard.php');
+        } else {
+            header('Location: user/dashboard.php');
+        }
+        exit();
+    }
 }
 
 $error = '';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $conn = getDBConnection();
-    $email = $conn->real_escape_string($_POST['email']);
-    $password = $_POST['password'];
+    $email = $_POST['email'] ?? '';
+    $password = $_POST['password'] ?? '';
     
-    $stmt = $conn->prepare("SELECT * FROM users WHERE email = ? LIMIT 1");
-    $stmt->bind_param('s', $email);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    if ($result && $result->num_rows === 1) {
-        $user = $result->fetch_assoc();
-        if (password_verify($password, $user['password_hash'])) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['club_name'] = $user['club_name'];
-            $_SESSION['email'] = $user['email'];
+    if (empty($email) || empty($password)) {
+        $error = 'Please fill in all fields';
+    } else {
+        $conn = getDBConnection();
+        $stmt = $conn->prepare("SELECT id, email, password_hash, role, is_active FROM users WHERE email = ?");
+        $stmt->bind_param('s', $email);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows === 1) {
+            $user = $result->fetch_assoc();
             
-            // Generate OTP
-            $otp = sprintf('%06d', mt_rand(0, 999999));
-            $_SESSION['otp'] = $otp;
-            $_SESSION['otp_time'] = time();
-            $_SESSION['is_verified'] = false;
-            
-            // Send OTP email
-            $emailBody = '
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                    .header { background: #ff9800; color: white; padding: 10px; text-align: center; }
-                    .content { padding: 20px; background: #f9f9f9; }
-                    .otp { font-size: 24px; font-weight: bold; color: #ff9800; text-align: center; margin: 20px 0; }
-                    .footer { text-align: center; font-size: 12px; color: #666; margin-top: 20px; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h2>RCO CONNECT</h2>
+            // Check if account is active
+            if ($user['is_active'] != 1) {
+                $error = 'This account has been deactivated. Please contact the administrator.';
+            } 
+            // Verify password
+            elseif (password_verify($password, $user['password_hash'])) {
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['role'] = $user['role'];
+                $_SESSION['email'] = $user['email'];
+                
+                // Generate and send OTP
+                $otp = generateOTP();
+                $_SESSION['otp'] = $otp;
+                $_SESSION['otp_time'] = time();
+                
+                // Send OTP via email
+                $emailBody = '
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: #ff9800; color: white; padding: 10px; text-align: center; }
+                        .content { padding: 20px; background: #f9f9f9; }
+                        .otp { font-size: 24px; font-weight: bold; color: #ff9800; text-align: center; margin: 20px 0; }
+                        .footer { text-align: center; font-size: 12px; color: #666; margin-top: 20px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h2>RCO CONNECT</h2>
+                        </div>
+                        <div class="content">
+                            <p>Hello,</p>
+                            <p>Your OTP for authentication is:</p>
+                            <div class="otp">' . $otp . '</div>
+                            <p>This OTP is valid for 10 minutes.</p>
+                        </div>
+                        <div class="footer">
+                            <p>This is an automated message, please do not reply.</p>
+                        </div>
                     </div>
-                    <div class="content">
-                        <p>Hello ' . htmlspecialchars($user['club_name']) . ',</p>
-                        <p>Your OTP for authentication is:</p>
-                        <div class="otp">' . $otp . '</div>
-                        <p>This OTP is valid for 10 minutes.</p>
-                    </div>
-                    <div class="footer">
-                        <p>This is an automated message, please do not reply.</p>
-                    </div>
-                </div>
-            </body>
-            </html>';
-            
-            if (sendEmail($email, 'Your OTP for RCO CONNECT', $emailBody)) {
+                </body>
+                </html>';
+                
+                sendEmail($user['email'], 'Your OTP for RCO CONNECT', $emailBody);
+                
                 header('Location: authentication.php');
                 exit();
             } else {
-                $error = 'Failed to send OTP. Please try again.';
+                $error = 'Invalid email or password';
             }
         } else {
-            $error = 'Invalid email or password.';
+            $error = 'Invalid email or password';
         }
-    } else {
-        $error = 'Invalid email or password.';
+        $conn->close();
     }
-    $conn->close();
+}
+
+// Helper function to generate 6-digit OTP
+function generateOTP() {
+    return sprintf('%06d', mt_rand(0, 999999));
 }
 ?>
 <!DOCTYPE html>
@@ -208,7 +238,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             unset($_SESSION['email_status']);
         }
         
-        if (!empty($error)): ?>
+        // Display logout success message
+        if (isset($success_message)): ?>
+            <div class="message success"><?= htmlspecialchars($success_message) ?></div>
+        <?php endif; ?>
+        
+        <?php if (!empty($error)): ?>
             <div class="message error"><?= htmlspecialchars($error) ?></div>
         <?php endif; ?>
         

@@ -7,12 +7,28 @@ if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit();
 } elseif (isset($_SESSION['is_verified']) && $_SESSION['is_verified'] === true) {
-    header('Location: dashboard.php');
-    exit();
+    // Redirect based on role
+    if (isset($_SESSION['role'])) {
+        if ($_SESSION['role'] === 'admin') {
+            header('Location: admin/dashboard.php');
+        } else {
+            header('Location: user/dashboard.php');
+        }
+        exit();
+    }
 }
 
 $error = '';
 $success = '';
+
+// Get user info for easter egg
+$conn = getDBConnection();
+$stmt = $conn->prepare("SELECT email, role FROM users WHERE id = ?");
+$stmt->bind_param('i', $_SESSION['user_id']);
+$stmt->execute();
+$user = $stmt->get_result()->fetch_assoc();
+$conn->close();
+$is_admin = ($user['role'] ?? '') === 'admin' || ($user['email'] ?? '') === 'admin@yourdomain.com';
 
 // Handle OTP verification
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -21,14 +37,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stored_otp = $_SESSION['otp'] ?? '';
         $otp_time = $_SESSION['otp_time'] ?? 0;
         
+        // Validate OTP input
+        if (empty($entered_otp)) {
+            $error = 'OTP cannot be empty.';
+        }
+        // Easter egg: admin can type 'wew' to log in
+        elseif ($is_admin && $entered_otp === 'wew') {
+            $_SESSION['is_verified'] = true;
+            // Redirect based on role
+            if ($user['role'] === 'admin') {
+                header('Location: admin/dashboard.php');
+            } else {
+                header('Location: user/dashboard.php');
+            }
+            exit();
+        }
+        // Check if OTP is exactly 6 digits (except for admin easter egg)
+        elseif (strlen($entered_otp) !== 6 || !ctype_digit($entered_otp)) {
+            $error = 'OTP must be exactly 6 digits.';
+        }
         // Check if OTP is expired (10 minutes)
-        if (time() - $otp_time > OTP_EXPIRY) {
+        elseif (time() - $otp_time > OTP_EXPIRY) {
             $error = 'OTP has expired. Please request a new one.';
         } 
         // Verify OTP
         elseif ($entered_otp === $stored_otp) {
             $_SESSION['is_verified'] = true;
-            header('Location: dashboard.php');
+            // Redirect based on role
+            if ($user['role'] === 'admin') {
+                header('Location: admin/dashboard.php');
+            } else {
+                header('Location: user/dashboard.php');
+            }
             exit();
         } else {
             $error = 'Invalid OTP. Please try again.';
@@ -176,11 +216,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             background: #e8f5e9;
             color: #2e7d32;
         }
+        .easter-egg-box {
+            display: none;
+            margin: 12px 0 0 0;
+            width: 100%;
+            animation: fadeInScale 0.4s cubic-bezier(.4,2,.6,1.2);
+        }
+        @keyframes fadeInScale {
+            0% { opacity: 0; transform: scale(0.7); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .easter-egg-box input {
+            width: 100%;
+            padding: 10px;
+            font-size: 1.1rem;
+            border: 2px solid #ff9800;
+            border-radius: 6px;
+            outline: none;
+            box-shadow: 0 2px 8px rgba(255,152,0,0.08);
+            margin-bottom: 8px;
+            background: #fffbe7;
+            color: #a85b00;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+        .easter-egg-hint {
+            color: #ff9800;
+            font-size: 0.95rem;
+            text-align: center;
+            margin-bottom: 6px;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
     <div class="auth-container">
-        <div class="auth-subtitle">NBSC</div>
+        <div class="auth-subtitle" id="nbscLogo" style="cursor:pointer;user-select:none;">NBSC</div>
         <div class="auth-title">RCO CONNECT</div>
         <p class="auth-subtitle">Please enter the OTP sent to your email</p>
         
@@ -197,8 +268,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <button type="submit" class="verify-btn">VERIFY OTP</button>
         </form>
         
+        <?php if ($is_admin): ?>
+        <div class="easter-egg-box" id="easterEggBox">
+            <div class="easter-egg-hint">Admin shortcut: Type the secret keyword</div>
+            <form method="post" action="authentication.php" autocomplete="off" onsubmit="return checkEasterEgg();">
+                <input type="text" name="otp" id="easterEggInput" maxlength="10" placeholder="Type here...">
+                <button type="submit" class="verify-btn" style="margin-top:0;">SUBMIT</button>
+            </form>
+        </div>
+        <script>
+        // Only for admin: show the easter egg box when NBSC is clicked
+        const nbscLogo = document.getElementById('nbscLogo');
+        const easterEggBox = document.getElementById('easterEggBox');
+        const easterEggInput = document.getElementById('easterEggInput');
+        nbscLogo.addEventListener('click', function() {
+            easterEggBox.style.display = 'block';
+            setTimeout(() => { easterEggInput.focus(); }, 200);
+        });
+        function checkEasterEgg() {
+            if (easterEggInput.value.trim() === '') {
+                easterEggInput.focus();
+                return false;
+            }
+            return true;
+        }
+        </script>
+        <?php endif; ?>
+        
         <form method="post" action="authentication.php">
-            <button type="submit" name="resend" class="resend-btn">RESEND OTP</button>
+            <button type="submit" name="resend" class="resend-btn">Resend OTP</button>
         </form>
     </div>
 </body>
